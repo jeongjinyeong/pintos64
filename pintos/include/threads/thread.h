@@ -90,8 +90,10 @@ struct thread {
 	tid_t tid;                          /* Thread identifier. */
 	enum thread_status status;          /* Thread state. */
 	char name[16];                      /* Name (for debugging purposes). */
-	int priority;                       /* Priority. */
-
+	int priority;  
+	int original_priority;                     /* Priority. */
+	struct lock *lock_waiting;
+	int wake_ticks;
 	/* Shared between thread.c and synch.c. */
 	struct list_elem elem;              /* List element. */
 
@@ -120,6 +122,11 @@ void thread_start (void);
 void thread_tick (void);
 void thread_print_stats (void);
 
+bool thread_wakeup_ticks (const struct list_elem *first_e, const struct list_elem *second_e, void *aux UNUSED);
+void thread_sleep (int64_t ticks);
+void thread_wakeup (int64_t current_ticks);
+bool thread_priority_cmp (const struct list_elem *first_e, const struct list_elem *second_e, void *aux UNUSED);
+
 typedef void thread_func (void *aux);
 tid_t thread_create (const char *name, int priority, thread_func *, void *);
 
@@ -138,6 +145,8 @@ void thread_set_priority (int);
 
 int thread_get_nice (void);
 void thread_set_nice (int);
+
+
 int thread_get_recent_cpu (void);
 int thread_get_load_avg (void);
 
