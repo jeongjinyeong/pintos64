@@ -28,6 +28,8 @@
    that are ready to run but not actually running. */
 static struct list ready_list;
 
+static struct list sleep_list;
+
 /* Idle thread. */
 static struct thread *idle_thread;
 
@@ -62,7 +64,7 @@ static void init_thread (struct thread *, const char *name, int priority);
 static void do_schedule(int status);
 static void schedule (void);
 static tid_t allocate_tid (void);
-
+static bool thread_deadline_ASC (const struct list_elem *a, const struct list_elem *b, void *aux UNUSED);
 /* Returns true if T appears to point to a valid thread. */
 #define is_thread(t) ((t) != NULL && (t)->magic == THREAD_MAGIC)
 
@@ -78,6 +80,23 @@ static tid_t allocate_tid (void);
 // Because the gdt will be setup after the thread_init, we should
 // setup temporal gdt first.
 static uint64_t gdt[3] = { 0, 0x00af9a000000ffff, 0x00cf92000000ffff };
+
+//이건 정렬에는 못씀 <=라서
+static bool
+thread_deadline_ASC (const struct list_elem *a, const struct list_elem *b, void *aux UNUSED) {
+    struct thread *thread_a = list_entry (a, struct thread, elem);
+    struct thread *thread_b = list_entry (b, struct thread, elem);
+
+    return thread_a->deadline <= thread_b->deadline;
+}
+
+bool
+thread_priority_DESC (const struct list_elem *a, const struct list_elem *b, void *aux UNUSED) {
+    struct thread *thread_a = list_entry (a, struct thread, elem);
+    struct thread *thread_b = list_entry (b, struct thread, elem);
+
+    return thread_a->priority > thread_b->priority;
+}
 
 /* Initializes the threading system by transforming the code
    that's currently running into a thread.  This can't work in
@@ -108,6 +127,7 @@ thread_init (void) {
 	/* Init the globla thread context */
 	lock_init (&tid_lock);
 	list_init (&ready_list);
+	list_init (&sleep_list);
 	list_init (&destruction_req);
 
 	/* Set up a thread structure for the running thread. */
@@ -153,6 +173,44 @@ thread_tick (void) {
 	if (++thread_ticks >= TIME_SLICE)
 		intr_yield_on_return ();
 }
+
+void
+ready_to_sleep (int64_t deadline) {
+    struct thread *curr = thread_current ();
+
+    curr->deadline = deadline;
+    enum intr_level old_level = intr_disable ();
+
+    list_insert_ordered (&sleep_list, &curr->elem, thread_deadline_ASC, NULL);
+
+    thread_block ();
+    intr_set_level (old_level);  
+}
+
+
+void
+sleep_to_ready(struct thread *t) {
+
+	list_remove(&t->elem);
+	thread_unblock(t);
+}
+
+void thread_awake(int64_t ticks) {
+	struct list_elem *e = list_begin (&sleep_list);
+
+    while (e != list_end (&sleep_list)) {
+        struct thread *t = list_entry (e, struct thread, elem);
+
+        if (t->deadline > ticks)
+            break;
+
+        struct list_elem *next = list_next (e);
+        sleep_to_ready (t);
+
+        e = next;
+    }
+}
+
 
 /* Prints thread statistics. */
 void
@@ -240,8 +298,17 @@ thread_unblock (struct thread *t) {
 
 	old_level = intr_disable ();
 	ASSERT (t->status == THREAD_BLOCKED);
-	list_push_back (&ready_list, &t->elem);
+
+    list_insert_ordered (&ready_list, &t->elem, thread_priority_DESC , NULL);
 	t->status = THREAD_READY;
+
+	if(t->priority > thread_current()->priority){
+		if(intr_context())
+			intr_yield_on_return ();
+		else
+			thread_yield();
+	}
+
 	intr_set_level (old_level);
 }
 
@@ -303,7 +370,8 @@ thread_yield (void) {
 
 	old_level = intr_disable ();
 	if (curr != idle_thread)
-		list_push_back (&ready_list, &curr->elem);
+		list_insert_ordered (&ready_list, &curr->elem, thread_priority_DESC , NULL);
+
 	do_schedule (THREAD_READY);
 	intr_set_level (old_level);
 }
@@ -312,6 +380,10 @@ thread_yield (void) {
 void
 thread_set_priority (int new_priority) {
 	thread_current ()->priority = new_priority;
+	if(!list_empty(&ready_list)){
+		if (new_priority < list_entry (list_begin (&ready_list), struct thread, elem)->priority)
+			thread_yield();
+	}
 }
 
 /* Returns the current thread's priority. */
