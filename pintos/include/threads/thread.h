@@ -91,6 +91,7 @@ struct thread {
 	enum thread_status status;          /* Thread state. */
 	char name[16];                      /* Name (for debugging purposes). */
 	int priority;                       /* Priority. */
+	int64_t deadline;										/* Start + tick */
 
 	/* Shared between thread.c and synch.c. */
 	struct list_elem elem;              /* List element. */
@@ -134,6 +135,15 @@ void thread_awake(int64_t ticks);
 void ready_to_sleep (int64_t deadline);
 void thread_tick (void);
 void thread_print_stats (void);
+
+bool less_deadline(struct list_elem *e1, struct list_elem *e2, void *aux UNUSED);
+bool greater_priority(struct list_elem *e1, struct list_elem *e2, void *aux UNUSED);
+
+void yield_priority_handler (struct thread *t);
+
+void ready_to_sleep(int64_t deadline);
+void thread_awake(int64_t ticks);
+void sleep_to_ready(struct thread *t);
 
 typedef void thread_func (void *aux);
 tid_t thread_create (const char *name, int priority, thread_func *, void *);

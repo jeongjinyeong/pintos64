@@ -69,7 +69,7 @@ sema_down (struct semaphore *sema) {
 
 	old_level = intr_disable ();
 	while (sema->value == 0) {
-        list_insert_ordered (&sema->waiters, &thread_current ()->elem, thread_priority_DESC, NULL);
+		list_insert_ordered (&sema->waiters, &thread_current ()->elem, greater_priority, NULL);
 		thread_block ();
 	}
 	sema->value--;
@@ -113,12 +113,15 @@ sema_up (struct semaphore *sema) {
 	ASSERT (sema != NULL);
 
 	old_level = intr_disable ();
-	
-	sema->value++; 
+	struct thread *t = NULL;
+	if (!list_empty (&sema->waiters)){
+		t = list_entry(list_pop_front (&sema->waiters), struct thread, elem);
+		thread_unblock (t);
+	}
+	sema->value++;
+	if (t!=NULL)
+		yield_priority_handler(t);
 
-	if (!list_empty (&sema->waiters))
-		thread_unblock (list_entry (list_pop_front (&sema->waiters),
-					struct thread, elem));
 	intr_set_level (old_level);
 }
 
@@ -268,6 +271,16 @@ cond_init (struct condition *cond) {
 	list_init (&cond->waiters);
 }
 
+bool
+greater_priority_semaphore(struct list_elem *e1, struct list_elem *e2){
+	struct semaphore_elem *s = list_entry(e2, struct semaphore_elem, elem);
+	struct thread *t1 = thread_current ();
+	if (list_empty(&s->semaphore.waiters))
+		return true;
+	struct thread *t2 = list_entry(list_front(&s->semaphore.waiters), struct thread, elem);
+	return t1->priority > t2->priority ? true : false;
+}
+
 /* Atomically releases LOCK and waits for COND to be signaled by
    some other piece of code.  After COND is signaled, LOCK is
    reacquired before returning.  LOCK must be held before calling
@@ -298,7 +311,8 @@ cond_wait (struct condition *cond, struct lock *lock) {
 	ASSERT (lock_held_by_current_thread (lock));
 
 	sema_init (&waiter.semaphore, 0);
-	list_push_back (&cond->waiters, &waiter.elem);
+	list_insert_ordered (&cond->waiters, &waiter.elem, greater_priority_semaphore, NULL);
+
 	lock_release (lock);
 	sema_down (&waiter.semaphore);
 	lock_acquire (lock);
