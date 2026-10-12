@@ -208,7 +208,13 @@ thread_create (const char *name, int priority,
 
 	/* Add to run queue. */
 	thread_unblock (t);
-
+	if (t->priority > thread_current()->priority)
+	{
+		if (!intr_context())
+		{
+			thread_yield();
+		}
+	}
 	return tid;
 }
 
@@ -246,6 +252,19 @@ thread_priority_cmp (const struct list_elem *first_e, const struct list_elem *se
 		return false;
 	}
 }
+
+bool
+thread_priority_cmp2 (const struct list_elem *first_e, const struct list_elem *second_e, void *aux UNUSED) {
+	struct thread *a = list_entry (first_e, struct thread, donations_elem);
+	struct thread *b = list_entry (second_e, struct thread, donations_elem);
+	if (a->priority > b->priority)
+	{
+		return true;
+	}
+	else {
+		return false;
+	}
+}
 void
 thread_unblock (struct thread *t) {
 	enum intr_level old_level;
@@ -257,15 +276,6 @@ thread_unblock (struct thread *t) {
 	list_insert_ordered(&ready_list, &t->elem, thread_priority_cmp, NULL);
 	t->status = THREAD_READY;
 	intr_set_level (old_level);
-
-	if (!intr_context())
-	{
-		struct thread *f = thread_current();
-		if (t->priority > f->priority)
-		{
-			thread_yield();
-		}
-	}
 }
 
 /* Returns the name of the running thread. */
@@ -331,10 +341,11 @@ thread_yield (void) {
 	intr_set_level (old_level);
 }
 
-
+ 
 /* ㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡ스레드 깨우는 코드ㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡ */
 void
 thread_wakeup (int64_t current_ticks) {
+	
     while (!list_empty(&sleep_list)) {
         struct list_elem *e = list_begin(&sleep_list);
         struct thread *t = list_entry(e, struct thread, elem);
@@ -342,9 +353,15 @@ thread_wakeup (int64_t current_ticks) {
         if (current_ticks < t->wake_ticks) {
             break;
         }
-
+		enum intr_level old_level = intr_disable();
         list_remove(e);
         thread_unblock(t);
+		intr_set_level (old_level);
+		
+		if (t->priority > thread_current()->priority)
+		{
+			intr_yield_on_return();
+		}
     }
 }
 
@@ -384,7 +401,6 @@ thread_sleep (int64_t ticks) {
 void
 thread_set_priority (int new_priority) {
 	thread_current ()->priority = new_priority;
-	enum intr_level old_level = intr_disable();
 	if (!list_empty(&ready_list))
 	{
 		struct thread *f = thread_current();
@@ -395,7 +411,6 @@ thread_set_priority (int new_priority) {
 			thread_yield();
 		}
 	}
-	intr_set_level(old_level);
 }
 
 /* Returns the current thread's priority. */
@@ -493,6 +508,11 @@ init_thread (struct thread *t, const char *name, int priority) {
 	t->tf.rsp = (uint64_t) t + PGSIZE - sizeof (void *);
 	t->priority = priority;
 	t->magic = THREAD_MAGIC;
+	t->original_priority = priority;
+	t->lock_waiting = NULL;
+	list_init(&t->donations);
+
+
 }
 
 /* Chooses and returns the next thread to be scheduled.  Should

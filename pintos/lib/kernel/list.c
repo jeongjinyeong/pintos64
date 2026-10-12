@@ -263,6 +263,8 @@ list_pop_back (struct list *list) {
 	return back;
 }
 
+
+
 /* Returns the front element in LIST.
    Undefined behavior if LIST is empty. */
 struct list_elem *
@@ -411,6 +413,8 @@ list_sort (struct list *list, list_less_func *less, void *aux) {
 
 	ASSERT (is_sorted (list_begin (list), list_end (list), less, aux));
 }
+
+
 
 /* Inserts ELEM in the proper position in LIST, which must be
    sorted according to LESS given auxiliary data AUX.

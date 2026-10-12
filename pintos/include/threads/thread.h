@@ -92,6 +92,8 @@ struct thread {
 	char name[16];                      /* Name (for debugging purposes). */
 	int priority;  
 	int original_priority;                     /* Priority. */
+	struct list donations;
+	struct list_elem donations_elem;
 	struct lock *lock_waiting;
 	int wake_ticks;
 	/* Shared between thread.c and synch.c. */
@@ -126,6 +128,7 @@ bool thread_wakeup_ticks (const struct list_elem *first_e, const struct list_ele
 void thread_sleep (int64_t ticks);
 void thread_wakeup (int64_t current_ticks);
 bool thread_priority_cmp (const struct list_elem *first_e, const struct list_elem *second_e, void *aux UNUSED);
+bool thread_priority_cmp2 (const struct list_elem *first_e, const struct list_elem *second_e, void *aux UNUSED);
 
 typedef void thread_func (void *aux);
 tid_t thread_create (const char *name, int priority, thread_func *, void *);
