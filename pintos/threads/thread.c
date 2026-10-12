@@ -111,6 +111,7 @@ thread_init (void) {
 	/* Init the globla thread context */
 	lock_init (&tid_lock);
 	list_init (&ready_list);
+	list_init (&sleep_list);
 	list_init (&destruction_req);
 	list_init (&sleep_list);
 
@@ -230,6 +231,44 @@ thread_awake (int64_t ticks) {
 			break;
 	}
 }
+
+void
+ready_to_sleep (int64_t deadline) {
+    struct thread *curr = thread_current ();
+
+    curr->deadline = deadline;
+    enum intr_level old_level = intr_disable ();
+
+    list_insert_ordered (&sleep_list, &curr->elem, thread_deadline_ASC, NULL);
+
+    thread_block ();
+    intr_set_level (old_level);  
+}
+
+
+void
+sleep_to_ready(struct thread *t) {
+
+	list_remove(&t->elem);
+	thread_unblock(t);
+}
+
+void thread_awake(int64_t ticks) {
+	struct list_elem *e = list_begin (&sleep_list);
+
+    while (e != list_end (&sleep_list)) {
+        struct thread *t = list_entry (e, struct thread, elem);
+
+        if (t->deadline > ticks)
+            break;
+
+        struct list_elem *next = list_next (e);
+        sleep_to_ready (t);
+
+        e = next;
+    }
+}
+
 
 /* Prints thread statistics. */
 void

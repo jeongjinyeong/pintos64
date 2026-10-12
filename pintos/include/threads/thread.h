@@ -96,6 +96,17 @@ struct thread {
 	/* Shared between thread.c and synch.c. */
 	struct list_elem elem;              /* List element. */
 
+	int64_t deadline;
+
+    
+    int init_priority;
+    
+    struct lock *wait_on_lock;
+    
+    struct list donations;
+    struct list_elem donation_elem;
+
+
 #ifdef USERPROG
 	/* Owned by userprog/process.c. */
 	uint64_t *pml4;                     /* Page map level 4 */
@@ -115,9 +126,13 @@ struct thread {
    Controlled by kernel command-line option "-o mlfqs". */
 extern bool thread_mlfqs;
 
+bool thread_priority_DESC (const struct list_elem *a, const struct list_elem *b, void *aux UNUSED);
+
 void thread_init (void);
 void thread_start (void);
 
+void thread_awake(int64_t ticks);
+void ready_to_sleep (int64_t deadline);
 void thread_tick (void);
 void thread_print_stats (void);
 
