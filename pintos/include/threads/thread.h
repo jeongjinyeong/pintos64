@@ -96,16 +96,6 @@ struct thread {
 	/* Shared between thread.c and synch.c. */
 	struct list_elem elem;              /* List element. */
 
-	int64_t deadline;
-
-    
-    int init_priority;
-    
-    struct lock *wait_on_lock;
-    
-    struct list donations;
-    struct list_elem donation_elem;
-
 
 #ifdef USERPROG
 	/* Owned by userprog/process.c. */
@@ -125,8 +115,6 @@ struct thread {
    If true, use multi-level feedback queue scheduler.
    Controlled by kernel command-line option "-o mlfqs". */
 extern bool thread_mlfqs;
-
-bool thread_priority_DESC (const struct list_elem *a, const struct list_elem *b, void *aux UNUSED);
 
 void thread_init (void);
 void thread_start (void);
