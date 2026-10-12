@@ -91,6 +91,7 @@ struct thread {
 	enum thread_status status;          /* Thread state. */
 	char name[16];                      /* Name (for debugging purposes). */
 	int priority;                       /* Priority. */
+	int priority_real;
 	int64_t deadline;										/* Start + tick */
 
 	/* Shared between thread.c and synch.c. */
@@ -119,8 +120,6 @@ extern bool thread_mlfqs;
 void thread_init (void);
 void thread_start (void);
 
-void thread_awake(int64_t ticks);
-void ready_to_sleep (int64_t deadline);
 void thread_tick (void);
 void thread_print_stats (void);
 

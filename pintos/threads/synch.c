@@ -32,9 +32,6 @@
 #include "threads/interrupt.h"
 #include "threads/thread.h"
 
-static bool sema_priority_DESC (const struct list_elem *a, const struct list_elem *b, void *aux UNUSED);
-
-
 /* Initializes semaphore SEMA to VALUE.  A semaphore is a
    nonnegative integer along with two atomic operators for
    manipulating it:
@@ -105,7 +102,6 @@ sema_try_down (struct semaphore *sema) {
    and wakes up one thread of those waiting for SEMA, if any.
 
    This function may be called from an interrupt handler. */
-
 void
 sema_up (struct semaphore *sema) {
 	enum intr_level old_level;
@@ -166,7 +162,7 @@ sema_test_helper (void *sema_) {
    try to acquire that lock.
 
    A lock is a specialization of a semaphore with an initial
-   value of 1.  The difference between a lock and such a
+   value of 1.  The difference between a lock and such 
    semaphore is twofold.  First, a semaphore can have a value
    greater than 1, but a lock can only be owned by a single
    thread at a time.  Second, a semaphore does not have an owner,
@@ -197,6 +193,9 @@ lock_acquire (struct lock *lock) {
 	ASSERT (!intr_context ());
 	ASSERT (!lock_held_by_current_thread (lock));
 
+	if(lock->holder != NULL && thread_current ()->priority > lock->holder->priority){
+		lock->holder->priority = thread_current ()->priority;
+	}
 	sema_down (&lock->semaphore);
 	lock->holder = thread_current ();
 }
@@ -231,6 +230,8 @@ lock_release (struct lock *lock) {
 	ASSERT (lock != NULL);
 	ASSERT (lock_held_by_current_thread (lock));
 
+	lock->holder->priority = lock->holder->priority_real;
+
 	lock->holder = NULL;
 	sema_up (&lock->semaphore);
 }
@@ -252,7 +253,7 @@ struct semaphore_elem {
 };
 
 bool
-greater_priority_semaphore(struct list_elem *e1, struct list_elem *e2){
+greater_priority_semaphore_elem(struct list_elem *e1, struct list_elem *e2){
 	struct semaphore_elem *s = list_entry(e2, struct semaphore_elem, elem);
 	struct thread *t1 = thread_current ();
 	if (list_empty(&s->semaphore.waiters))
@@ -301,7 +302,7 @@ cond_wait (struct condition *cond, struct lock *lock) {
 	ASSERT (lock_held_by_current_thread (lock));
 
 	sema_init (&waiter.semaphore, 0);
-	list_insert_ordered (&cond->waiters, &waiter.elem, greater_priority_semaphore, NULL);
+	list_insert_ordered (&cond->waiters, &waiter.elem, greater_priority_semaphore_elem, NULL);
 
 	lock_release (lock);
 	sema_down (&waiter.semaphore);

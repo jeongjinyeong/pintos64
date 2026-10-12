@@ -13,6 +13,16 @@ static thread_func priority_condvar_thread;
 static struct lock lock;
 static struct condition condition;
 
+struct semaphore_elem {
+	struct list_elem elem;              /* List element. */
+	struct semaphore semaphore;         /* This semaphore. */
+};
+
+// struct semaphore {
+// 	unsigned value;             /* Current value. */
+// 	struct list waiters;        /* List of waiting threads. */
+// };
+
 void
 test_priority_condvar (void) 
 {
