@@ -90,14 +90,22 @@ struct thread {
 	tid_t tid;                          /* Thread identifier. */
 	enum thread_status status;          /* Thread state. */
 	char name[16];                      /* Name (for debugging purposes). */
-	int priority;  
-	int original_priority;                     /* Priority. */
-	struct list donations;
-	struct list_elem donations_elem;
-	struct lock *lock_waiting;
-	int wake_ticks;
+	int priority;                       /* Priority. */
+	int64_t deadline;										/* Start + tick */
+
 	/* Shared between thread.c and synch.c. */
 	struct list_elem elem;              /* List element. */
+
+	int64_t deadline;
+
+    
+    int init_priority;
+    
+    struct lock *wait_on_lock;
+    
+    struct list donations;
+    struct list_elem donation_elem;
+
 
 #ifdef USERPROG
 	/* Owned by userprog/process.c. */
@@ -118,17 +126,24 @@ struct thread {
    Controlled by kernel command-line option "-o mlfqs". */
 extern bool thread_mlfqs;
 
+bool thread_priority_DESC (const struct list_elem *a, const struct list_elem *b, void *aux UNUSED);
+
 void thread_init (void);
 void thread_start (void);
 
+void thread_awake(int64_t ticks);
+void ready_to_sleep (int64_t deadline);
 void thread_tick (void);
 void thread_print_stats (void);
 
-bool thread_wakeup_ticks (const struct list_elem *first_e, const struct list_elem *second_e, void *aux UNUSED);
-void thread_sleep (int64_t ticks);
-void thread_wakeup (int64_t current_ticks);
-bool thread_priority_cmp (const struct list_elem *first_e, const struct list_elem *second_e, void *aux UNUSED);
-bool thread_priority_cmp2 (const struct list_elem *first_e, const struct list_elem *second_e, void *aux UNUSED);
+bool less_deadline(struct list_elem *e1, struct list_elem *e2, void *aux UNUSED);
+bool greater_priority(struct list_elem *e1, struct list_elem *e2, void *aux UNUSED);
+
+void yield_priority_handler (struct thread *t);
+
+void ready_to_sleep(int64_t deadline);
+void thread_awake(int64_t ticks);
+void sleep_to_ready(struct thread *t);
 
 typedef void thread_func (void *aux);
 tid_t thread_create (const char *name, int priority, thread_func *, void *);
@@ -148,8 +163,6 @@ void thread_set_priority (int);
 
 int thread_get_nice (void);
 void thread_set_nice (int);
-
-
 int thread_get_recent_cpu (void);
 int thread_get_load_avg (void);
 

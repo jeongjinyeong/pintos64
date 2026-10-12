@@ -88,22 +88,16 @@ timer_elapsed (int64_t then) {
 }
 
 /* Suspends execution for approximately TICKS timer ticks. */
-
-
 void
 timer_sleep (int64_t ticks) {
+	if(ticks <= 0) return;
+
+	ASSERT (intr_get_level () == INTR_ON);
+
 	int64_t start = timer_ticks ();
-    ASSERT (intr_get_level () == INTR_ON);
-    
-    /* 이 줄이 없으면 alarm-zero, alarm-negative 테스트 등에서 꼬일 수 있습니다 */
-    if (ticks <= 0) {
-        return;
-    }
-    
-    thread_sleep(ticks);
+	
+	ready_to_sleep(start + ticks);
 }
-
-
 
 /* Suspends execution for approximately MS milliseconds. */
 void
@@ -130,11 +124,12 @@ timer_print_stats (void) {
 }
 
 /* Timer interrupt handler. */
+
 static void
 timer_interrupt (struct intr_frame *args UNUSED) {
 	ticks++;
+	thread_awake (ticks);
 	thread_tick ();
-	thread_wakeup (ticks);
 }
 
 /* Returns true if LOOPS iterations waits for more than one timer
@@ -171,8 +166,8 @@ busy_wait (int64_t loops) {
 /* Sleep for approximately NUM/DENOM seconds. */
 static void
 real_time_sleep (int64_t num, int32_t denom) {
-	
 	/* Convert NUM/DENOM seconds into timer ticks, rounding down.
+
 	   (NUM / DENOM) s
 	   ---------------------- = NUM * TIMER_FREQ / DENOM ticks.
 	   1 s / TIMER_FREQ ticks
