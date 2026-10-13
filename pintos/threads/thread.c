@@ -66,6 +66,8 @@ static void do_schedule(int status);
 static void schedule (void);
 static tid_t allocate_tid (void);
 
+static bool less_deadline (const struct list_elem *e1, const struct list_elem *e2, void *aux UNUSED);
+
 /* Returns true if T appears to point to a valid thread. */
 #define is_thread(t) ((t) != NULL && (t)->magic == THREAD_MAGIC)
 
@@ -81,6 +83,19 @@ static tid_t allocate_tid (void);
 // Because the gdt will be setup after the thread_init, we should
 // setup temporal gdt first.
 static uint64_t gdt[3] = { 0, 0x00af9a000000ffff, 0x00cf92000000ffff };
+
+void 
+thread_donate_priority (struct thread *t, int new_priority) {
+    t->priority = new_priority;
+
+    if (t->status == THREAD_READY) {
+		enum intr_level old_level = intr_disable ();
+        list_remove (&t->elem);
+        list_insert_ordered (&ready_list, &t->elem, greater_priority, NULL);
+        intr_set_level (old_level);
+    }
+}
+
 
 /* Initializes the threading system by transforming the code
    that's currently running into a thread.  This can't work in
@@ -113,7 +128,6 @@ thread_init (void) {
 	list_init (&ready_list);
 	list_init (&sleep_list);
 	list_init (&destruction_req);
-	list_init (&sleep_list);
 
 	/* Set up a thread structure for the running thread. */
 	initial_thread = running_thread ();
@@ -161,8 +175,8 @@ thread_tick (void) {
 }
 
 /* sleep_list deadline 정렬을 위한 비교 함수 */
-bool
-less_deadline (struct list_elem *e1, struct list_elem *e2, void *aux UNUSED) {
+static bool
+less_deadline (const struct list_elem *e1, const struct list_elem *e2, void *aux UNUSED) {
 	struct thread *t1 = list_entry(e1, struct thread, elem);
 	struct thread *t2 = list_entry(e2, struct thread, elem);
 	return t1->deadline <= t2->deadline ? true : false;
@@ -170,7 +184,7 @@ less_deadline (struct list_elem *e1, struct list_elem *e2, void *aux UNUSED) {
 
 /* ready_list priority 정렬을 위한 비교 함수 */
 bool
-greater_priority (struct list_elem *e1, struct list_elem *e2, void *aux UNUSED) {
+greater_priority (const struct list_elem *e1, const struct list_elem *e2, void *aux UNUSED) {
 	struct thread *t1 = list_entry(e1, struct thread, elem);
 	struct thread *t2 = list_entry(e2, struct thread, elem);
 	return t1->priority > t2->priority ? true : false;
@@ -395,9 +409,30 @@ thread_yield (void) {
 /* Sets the current thread's priority to NEW_PRIORITY. */
 void
 thread_set_priority (int new_priority) {
-	thread_current ()->priority = new_priority;
-	if (!list_empty (&ready_list))
-		yield_priority_handler (list_entry(list_begin (&ready_list), struct thread, elem));
+    struct thread *curr = thread_current ();
+    
+    curr->init_priority = new_priority;
+
+    if (new_priority > curr->priority) {
+        curr->priority = new_priority;}
+
+    else {
+        curr->priority = curr->init_priority;
+
+		if (!list_empty (&curr->donors)) {
+			struct list_elem *e;
+			for (e = list_begin(&curr->donors); e != list_end(&curr->donors); e = list_next(e)) {
+				struct thread *donor = list_entry(e, struct thread, d_elem);
+				if(donor->priority > curr->priority) {
+					curr->priority = donor->priority;}
+			}
+		}
+
+        if (!list_empty (&ready_list)) {
+            if (curr->priority < list_entry (list_begin (&ready_list), struct thread, elem)->priority) {
+                thread_yield ();}
+        }
+    }
 }
 
 /* Returns the current thread's priority. */
@@ -494,8 +529,11 @@ init_thread (struct thread *t, const char *name, int priority) {
 	strlcpy (t->name, name, sizeof t->name);
 	t->tf.rsp = (uint64_t) t + PGSIZE - sizeof (void *);
 	t->priority = priority;
+	t->init_priority = priority;
 	t->deadline = 0;
 	t->magic = THREAD_MAGIC;
+	t->lock_needed = NULL;
+    list_init (&t->donors); 
 }
 
 /* Chooses and returns the next thread to be scheduled.  Should

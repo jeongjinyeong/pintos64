@@ -91,11 +91,17 @@ struct thread {
 	enum thread_status status;          /* Thread state. */
 	char name[16];                      /* Name (for debugging purposes). */
 	int priority;                       /* Priority. */
+	int init_priority;
+
 	int64_t deadline;										/* Start + tick */
+
+	struct lock *lock_needed;
 
 	/* Shared between thread.c and synch.c. */
 	struct list_elem elem;              /* List element. */
-
+    
+    struct list donors;
+    struct list_elem d_elem;
 
 #ifdef USERPROG
 	/* Owned by userprog/process.c. */
@@ -124,8 +130,8 @@ void ready_to_sleep (int64_t deadline);
 void thread_tick (void);
 void thread_print_stats (void);
 
-bool less_deadline(struct list_elem *e1, struct list_elem *e2, void *aux UNUSED);
-bool greater_priority(struct list_elem *e1, struct list_elem *e2, void *aux UNUSED);
+void thread_donate_priority (struct thread *t, int new_priority);
+bool greater_priority(const struct list_elem *e1, const struct list_elem *e2, void *aux UNUSED);
 
 void yield_priority_handler (struct thread *t);
 
