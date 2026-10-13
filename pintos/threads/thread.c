@@ -66,6 +66,18 @@ static void do_schedule(int status);
 static void schedule (void);
 static tid_t allocate_tid (void);
 
+void 
+thread_donate_priority (struct thread *t, int new_priority) {
+    t->priority = new_priority;
+
+    if (t->status == THREAD_READY) {
+		enum intr_level old_level = intr_disable ();
+        list_remove (&t->elem);
+        list_insert_ordered (&ready_list, &t->elem, greater_priority, NULL);
+        intr_set_level (old_level);
+    }
+}
+
 /* Returns true if T appears to point to a valid thread. */
 #define is_thread(t) ((t) != NULL && (t)->magic == THREAD_MAGIC)
 
@@ -395,9 +407,29 @@ thread_yield (void) {
 /* Sets the current thread's priority to NEW_PRIORITY. */
 void
 thread_set_priority (int new_priority) {
-	thread_current ()->priority = new_priority;
-	if (!list_empty (&ready_list))
-		yield_priority_handler (list_entry(list_begin (&ready_list), struct thread, elem));
+	struct thread *curr = thread_current ();
+
+    curr->init_priority = new_priority;
+
+    if (new_priority > curr->priority) {
+        curr->priority = new_priority;}
+    else {
+        curr->priority = curr->init_priority;
+
+		if (!list_empty (&curr->donors)) {
+			struct list_elem *e;
+			for (e = list_begin(&curr->donors); e != list_end(&curr->donors); e = list_next(e)) {
+				struct thread *donor = list_entry(e, struct thread, d_elem);
+				if(donor->priority > curr->priority) {
+					curr->priority = donor->priority;}
+			}
+		}
+
+        if (!list_empty (&ready_list)) {
+            if (curr->priority < list_entry (list_begin (&ready_list), struct thread, elem)->priority) {
+                thread_yield ();}
+		}
+	}
 }
 
 /* Returns the current thread's priority. */
@@ -494,8 +526,12 @@ init_thread (struct thread *t, const char *name, int priority) {
 	strlcpy (t->name, name, sizeof t->name);
 	t->tf.rsp = (uint64_t) t + PGSIZE - sizeof (void *);
 	t->priority = priority;
+	t->init_priority = priority;
 	t->deadline = 0;
 	t->magic = THREAD_MAGIC;
+
+	t->lock_needed = NULL;
+	list_init (&t->donors); 
 }
 
 /* Chooses and returns the next thread to be scheduled.  Should
