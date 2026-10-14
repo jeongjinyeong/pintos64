@@ -22,7 +22,7 @@ struct lock {
 	struct semaphore semaphore; /* Binary semaphore controlling access. */
 };
 
-bool list_max_priority(const struct list_elem *max, const struct list_elem *e, void *aux);
+bool greater_priority_donor_list_max(const struct list_elem *max, const struct list_elem *e, void *aux);
 
 void lock_init (struct lock *);
 void lock_acquire (struct lock *);

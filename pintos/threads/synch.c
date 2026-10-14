@@ -99,7 +99,7 @@ sema_try_down (struct semaphore *sema) {
 }
 
 bool
-greater_priority_list_max (const struct list_elem *e1, const struct list_elem *e2, void *aux UNUSED){
+greater_priority_list_elem (const struct list_elem *e1, const struct list_elem *e2, void *aux UNUSED){
 	return list_entry(e1, struct thread, elem)->priority < list_entry(e2, struct thread, elem)->priority ? true : false;
 }
 
@@ -116,7 +116,7 @@ sema_up (struct semaphore *sema) {
 	old_level = intr_disable ();
 	struct thread *t = NULL;
 	if (!list_empty (&sema->waiters)){
-		t = list_entry(list_max (&sema->waiters, greater_priority_list_max, NULL), struct thread, elem);
+		t = list_entry(list_max (&sema->waiters, greater_priority_list_elem, NULL), struct thread, elem);
 		list_remove(&t->elem);
 		thread_unblock (t);
 	}
@@ -200,7 +200,7 @@ lock_acquire (struct lock *lock) {
 	ASSERT (!lock_held_by_current_thread (lock));
 
 	if(lock->holder != NULL){
-		list_insert_ordered (&(lock->holder->donors), &thread_current ()->donor, greater_priority_donor, NULL);
+		list_insert_ordered (&(lock->holder->donors), &thread_current ()->donor, greater_priority_donor_insert_ordered, NULL);
 		thread_current ()->lock = lock;
 
 		struct thread *t = thread_current ();
@@ -235,7 +235,7 @@ lock_try_acquire (struct lock *lock) {
 }
 
 bool
-list_max_priority(const struct list_elem *max, const struct list_elem *e, void *aux UNUSED){
+greater_priority_donor_list_max(const struct list_elem *max, const struct list_elem *e, void *aux UNUSED){
 	return list_entry(max, struct thread, donor)->priority < list_entry(e, struct thread, donor)->priority ? true : false;
 }
 
@@ -257,7 +257,7 @@ lock_release (struct lock *lock) {
 		}
 	}
 	if(!list_empty(&thread_current()->donors))
-		thread_current ()->priority = list_entry(list_max(&thread_current()->donors, list_max_priority, NULL), struct thread, donor)->priority;
+		thread_current ()->priority = list_entry(list_max(&thread_current()->donors, greater_priority_donor_list_max, NULL), struct thread, donor)->priority;
 	else
 		thread_current ()->priority = thread_current()->priority_real;
 

@@ -178,7 +178,7 @@ greater_priority (const struct list_elem *e1, const struct list_elem *e2, void *
 
 /* donors 정렬을 위한 비교 함수 */
 bool
-greater_priority_donor (const struct list_elem *e1, const struct list_elem *e2, void *aux UNUSED) {
+greater_priority_donor_insert_ordered (const struct list_elem *e1, const struct list_elem *e2, void *aux UNUSED) {
 	struct thread *t1 = list_entry(e1, struct thread, donor);
 	struct thread *t2 = list_entry(e2, struct thread, donor);
 	return t1->priority > t2->priority ? true : false;
@@ -415,7 +415,7 @@ thread_set_priority (int new_priority) {
 	}
 	else{
 		if(!list_empty(&thread_current()->donors)){
-			int priority = list_entry(list_max(&thread_current ()->donors, list_max_priority, NULL), struct thread, donor)->priority;
+			int priority = list_entry(list_max(&thread_current ()->donors, greater_priority_donor_list_max, NULL), struct thread, donor)->priority;
 			thread_current ()->priority = thread_current ()->priority_real > priority ? thread_current ()->priority_real : priority;
 		}
 		else{
