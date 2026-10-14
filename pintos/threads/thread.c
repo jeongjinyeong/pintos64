@@ -162,7 +162,7 @@ thread_tick (void) {
 
 /* sleep_list deadline 정렬을 위한 비교 함수 */
 bool
-less_deadline (struct list_elem *e1, struct list_elem *e2, void *aux UNUSED) {
+less_deadline (const struct list_elem *e1, const struct list_elem *e2, void *aux UNUSED) {
 	struct thread *t1 = list_entry(e1, struct thread, elem);
 	struct thread *t2 = list_entry(e2, struct thread, elem);
 	return t1->deadline <= t2->deadline ? true : false;
@@ -170,10 +170,23 @@ less_deadline (struct list_elem *e1, struct list_elem *e2, void *aux UNUSED) {
 
 /* ready_list priority 정렬을 위한 비교 함수 */
 bool
-greater_priority (struct list_elem *e1, struct list_elem *e2, void *aux UNUSED) {
+greater_priority (const struct list_elem *e1, const struct list_elem *e2, void *aux UNUSED) {
 	struct thread *t1 = list_entry(e1, struct thread, elem);
 	struct thread *t2 = list_entry(e2, struct thread, elem);
 	return t1->priority > t2->priority ? true : false;
+}
+
+/* donors 정렬을 위한 비교 함수 */
+bool
+greater_priority_donor (const struct list_elem *e1, const struct list_elem *e2, void *aux UNUSED) {
+	struct thread *t1 = list_entry(e1, struct thread, donor);
+	struct thread *t2 = list_entry(e2, struct thread, donor);
+	return t1->priority > t2->priority ? true : false;
+}
+
+void
+ready_list_sort (void) {
+	list_sort(&ready_list, greater_priority, NULL);
 }
 
 void
@@ -396,8 +409,19 @@ thread_yield (void) {
 void
 thread_set_priority (int new_priority) {
 	thread_current ()->priority_real = new_priority;
-	if(new_priority > thread_current ()->priority)
+
+	if(new_priority > thread_current ()->priority){
 		thread_current ()->priority = new_priority;
+	}
+	else{
+		if(!list_empty(&thread_current()->donors)){
+			int priority = list_entry(list_max(&thread_current ()->donors, list_max_priority, NULL), struct thread, donor)->priority;
+			thread_current ()->priority = thread_current ()->priority_real > priority ? thread_current ()->priority_real : priority;
+		}
+		else{
+			thread_current ()->priority = thread_current ()->priority_real;
+		}
+	}
 	if (!list_empty (&ready_list))
 		yield_priority_handler (list_entry(list_begin (&ready_list), struct thread, elem));
 }
@@ -499,6 +523,8 @@ init_thread (struct thread *t, const char *name, int priority) {
 	t->priority_real = priority;
 	t->deadline = 0;
 	t->magic = THREAD_MAGIC;
+	list_init(&t->donors);
+	t->lock = NULL;
 }
 
 /* Chooses and returns the next thread to be scheduled.  Should

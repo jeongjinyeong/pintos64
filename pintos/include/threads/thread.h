@@ -96,6 +96,9 @@ struct thread {
 
 	/* Shared between thread.c and synch.c. */
 	struct list_elem elem;              /* List element. */
+	struct list_elem donor;
+	struct list donors;
+	struct lock *lock;
 
 
 #ifdef USERPROG
@@ -123,8 +126,10 @@ void thread_start (void);
 void thread_tick (void);
 void thread_print_stats (void);
 
-bool less_deadline(struct list_elem *e1, struct list_elem *e2, void *aux UNUSED);
-bool greater_priority(struct list_elem *e1, struct list_elem *e2, void *aux UNUSED);
+bool less_deadline(const struct list_elem *e1, const struct list_elem *e2, void *aux UNUSED);
+bool greater_priority(const struct list_elem *e1, const struct list_elem *e2, void *aux UNUSED);
+bool greater_priority_donor (const struct list_elem *e1, const struct list_elem *e2, void *aux UNUSED);
+void ready_list_sort (void);
 
 void yield_priority_handler (struct thread *t);
 

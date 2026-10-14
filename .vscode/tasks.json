@@ -4,7 +4,7 @@
         {
             "label": "pintos: run current test",
             "type": "shell",
-            "command": "set -e; source ${workspaceFolder}/pintos/activate; T=${relativeFileDirname}/${fileBasenameNoExtension}; T=${T#*tests/}; cd ${workspaceFolder}/pintos/${input:project}; make; cd build; rm -f tests/$T.output tests/$T.result; make tests/$T.result || true; echo; echo '===== RESULT ====='; cat tests/$T.result",
+            "command": "set -e; T=${relativeFileDirname}/${fileBasenameNoExtension}; T=${T#*tests/}; cd ${workspaceFolder}/pintos/${input:project}; make; cd build; rm -f tests/$T.output tests/$T.result; make tests/$T.result || true; echo; echo '===== RESULT ====='; cat tests/$T.result",
             "presentation": {
                 "reveal": "always",
                 "panel": "dedicated",
@@ -26,7 +26,7 @@
         {
             "label": "pintos: make check",
             "type": "shell",
-            "command": "set -e; source ${workspaceFolder}/pintos/activate; cd ${workspaceFolder}/pintos/${input:project}; make; cd build; make check",
+            "command": "set -e; cd ${workspaceFolder}/pintos/${input:project}; make; cd build; make check",
             "presentation": {
                 "reveal": "always",
                 "panel": "dedicated",
