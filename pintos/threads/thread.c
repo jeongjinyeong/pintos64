@@ -11,6 +11,7 @@
 #include "threads/synch.h"
 #include "threads/vaddr.h"
 #include "intrinsic.h"
+#include "threads/fixed_point.h"
 #ifdef USERPROG
 #include "userprog/process.h"
 #endif
@@ -27,9 +28,12 @@
 /* List of processes in THREAD_READY state, that is, processes
    that are ready to run but not actually running. */
 static struct list ready_list;
-
+static int ready_threads;
 /* Sleep list */
 static struct list sleep_list;
+/*all_thread_list*/
+static struct list all_tlist;
+static int load_avg;
 
 /* Idle thread. */
 static struct thread *idle_thread;
@@ -66,7 +70,7 @@ static void do_schedule(int status);
 static void schedule (void);
 static tid_t allocate_tid (void);
 
-static bool less_deadline (const struct list_elem *e1, const struct list_elem *e2, void *aux UNUSED);
+static bool thread_deadline_ASC (const struct list_elem *a, const struct list_elem *b, void *aux UNUSED);
 
 /* Returns true if T appears to point to a valid thread. */
 #define is_thread(t) ((t) != NULL && (t)->magic == THREAD_MAGIC)
@@ -84,6 +88,31 @@ static bool less_deadline (const struct list_elem *e1, const struct list_elem *e
 // setup temporal gdt first.
 static uint64_t gdt[3] = { 0, 0x00af9a000000ffff, 0x00cf92000000ffff };
 
+void
+yield_priority_handler (struct thread *t) {
+	ASSERT ( is_thread(t) );
+
+	enum intr_level old_level = intr_disable();
+	if (t->priority > (thread_current ()->priority)){
+		if(intr_context()){
+			intr_yield_on_return();
+		}else{
+			thread_yield();
+		}
+	}
+	intr_set_level(old_level);
+}
+
+void
+yield_in_interrupt (void){
+    if (thread_mlfqs && !list_empty(&ready_list)) {
+        struct thread *t = list_entry (list_begin (&ready_list), struct thread, elem);
+        if (thread_current ()->priority < t->priority) {
+            intr_yield_on_return (); 
+        }
+    }
+}
+
 void 
 thread_donate_priority (struct thread *t, int new_priority) {
     t->priority = new_priority;
@@ -91,9 +120,85 @@ thread_donate_priority (struct thread *t, int new_priority) {
     if (t->status == THREAD_READY) {
 		enum intr_level old_level = intr_disable ();
         list_remove (&t->elem);
-        list_insert_ordered (&ready_list, &t->elem, greater_priority, NULL);
+        list_insert_ordered (&ready_list, &t->elem, thread_priority_DESC, NULL);
         intr_set_level (old_level);
     }
+}
+
+//이건 정렬에는 못씀 <=라서
+static bool
+thread_deadline_ASC (const struct list_elem *a, const struct list_elem *b, void *aux UNUSED) {
+    struct thread *thread_a = list_entry (a, struct thread, elem);
+    struct thread *thread_b = list_entry (b, struct thread, elem);
+
+    return thread_a->deadline <= thread_b->deadline;
+}
+
+bool
+thread_priority_DESC (const struct list_elem *a, const struct list_elem *b, void *aux UNUSED) {
+    struct thread *thread_a = list_entry (a, struct thread, elem);
+    struct thread *thread_b = list_entry (b, struct thread, elem);
+
+    return thread_a->priority > thread_b->priority;
+}
+
+//ready_list 에서의 insert_ordered by priority
+static void insert_ordered_ready_list(struct thread *t) {
+	ASSERT (intr_get_level () == INTR_OFF);
+    list_insert_ordered(&ready_list, &t->elem, thread_priority_DESC, NULL);
+    ready_threads++;
+}
+
+//ready_list 에서의 list_pop_front
+static struct thread *pop_front_ready_list(void) {
+	ASSERT (intr_get_level () == INTR_OFF);
+
+
+    if (list_empty(&ready_list)) return NULL;
+
+    struct thread *t = list_entry(list_pop_front(&ready_list), struct thread, elem);
+    ready_threads--;
+
+    return t;
+}
+void cal_load_avg (void) {
+    int ready_threads_cnt = ready_threads; 
+    
+    if (thread_current () != idle_thread) {
+        ready_threads_cnt++;}
+    
+    load_avg = MUL_FP (DIV_FP_INT (INT_TO_FP (59), 60), load_avg) + MUL_FP_INT (DIV_FP_INT (INT_TO_FP (1), 60), ready_threads_cnt);
+}
+
+void cal_recent_cpu (void) {
+    struct list_elem *e;
+    
+    for (e = list_begin (&all_tlist); e != list_end (&all_tlist); e = list_next (e)) {
+        struct thread *t = list_entry (e, struct thread, telem);
+        
+        if (t != idle_thread) {
+            int dload_avg = MUL_FP_INT (load_avg, 2);			//dload_avg = load_avg * 2
+            
+            t->recent_cpu = ADD_FP_INT (MUL_FP (DIV_FP (dload_avg, ADD_FP_INT (dload_avg, 1)), t->recent_cpu), t->nice);
+        }
+    }
+}
+
+void cal_priority (void) {
+    struct list_elem *e;
+    
+    for (e = list_begin (&all_tlist); e != list_end (&all_tlist); e = list_next (e)) {
+        struct thread *t = list_entry (e, struct thread, telem);
+        
+        if (t != idle_thread) {
+            int recent_cpu_div_4 = FP_TO_INT_RN (DIV_FP_INT (t->recent_cpu, 4));
+            t->priority = PRI_MAX - recent_cpu_div_4 - (t->nice * 2);
+
+            if (t->priority > PRI_MAX) t->priority = PRI_MAX;
+            if (t->priority < PRI_MIN) t->priority = PRI_MIN;
+        }
+    }
+	list_sort (&ready_list, thread_priority_DESC, NULL);
 }
 
 
@@ -126,9 +231,12 @@ thread_init (void) {
 	/* Init the globla thread context */
 	lock_init (&tid_lock);
 	list_init (&ready_list);
+	ready_threads = 0;
 	list_init (&sleep_list);
 	list_init (&destruction_req);
+	list_init (&all_tlist);
 
+	load_avg = 0;
 	/* Set up a thread structure for the running thread. */
 	initial_thread = running_thread ();
 	init_thread (initial_thread, "main", PRI_DEFAULT);
@@ -168,41 +276,13 @@ thread_tick (void) {
 	else
 		kernel_ticks++;
 
+	if (thread_mlfqs && t != idle_thread) {
+        t->recent_cpu = ADD_FP_INT (t->recent_cpu, 1);}
+
 	/* Enforce preemption. */
 	if (++thread_ticks >= TIME_SLICE){
 		intr_yield_on_return ();
 	}
-}
-
-/* sleep_list deadline 정렬을 위한 비교 함수 */
-static bool
-less_deadline (const struct list_elem *e1, const struct list_elem *e2, void *aux UNUSED) {
-	struct thread *t1 = list_entry(e1, struct thread, elem);
-	struct thread *t2 = list_entry(e2, struct thread, elem);
-	return t1->deadline <= t2->deadline ? true : false;
-}
-
-/* ready_list priority 정렬을 위한 비교 함수 */
-bool
-greater_priority (const struct list_elem *e1, const struct list_elem *e2, void *aux UNUSED) {
-	struct thread *t1 = list_entry(e1, struct thread, elem);
-	struct thread *t2 = list_entry(e2, struct thread, elem);
-	return t1->priority > t2->priority ? true : false;
-}
-
-void
-yield_priority_handler (struct thread *t) {
-	ASSERT ( is_thread(t) );
-
-	enum intr_level old_level = intr_disable();
-	if (t->priority > (thread_current ()->priority)){
-		if(intr_context()){
-			intr_yield_on_return();
-		}else{
-			thread_yield();
-		}
-	}
-	intr_set_level(old_level);
 }
 
 /* timer_sleep 호출시 ready_list에서 sleep_list로 이동 */
@@ -213,7 +293,7 @@ ready_to_sleep (int64_t deadline) {
 	curr->deadline = deadline;	// interrupt disable 시점 주의
 	enum intr_level old_level = intr_disable ();
 
-	list_insert_ordered(&sleep_list, &curr->elem, less_deadline, NULL);
+    list_insert_ordered (&sleep_list, &curr->elem, thread_deadline_ASC, NULL);
 
 	thread_block();
 
@@ -224,9 +304,9 @@ void
 sleep_to_ready (struct thread *t) {
 	enum intr_level old_level = intr_disable();
 	list_remove (&t->elem);
-	intr_set_level (old_level);
-
 	thread_unblock(t);
+
+	intr_set_level (old_level);
 	yield_priority_handler(t);
 }
 
@@ -337,7 +417,8 @@ thread_unblock (struct thread *t) {
 
 	old_level = intr_disable ();
 	ASSERT (t->status == THREAD_BLOCKED);
-	list_insert_ordered (&ready_list, &t->elem, greater_priority, NULL);
+
+	insert_ordered_ready_list(t);
 	t->status = THREAD_READY;
 
 	intr_set_level (old_level);
@@ -386,6 +467,8 @@ thread_exit (void) {
 	/* Just set our status to dying and schedule another process.
 	   We will be destroyed during the call to schedule_tail(). */
 	intr_disable ();
+	if (thread_mlfqs) {
+        list_remove (&thread_current ()->telem);}
 	do_schedule (THREAD_DYING);
 	NOT_REACHED ();
 }
@@ -401,7 +484,8 @@ thread_yield (void) {
 
 	old_level = intr_disable ();
 	if (curr != idle_thread)
-		list_insert_ordered (&ready_list, &curr->elem, greater_priority, NULL);
+				insert_ordered_ready_list(curr);
+
 	do_schedule (THREAD_READY);
 	intr_set_level (old_level);
 }
@@ -409,6 +493,8 @@ thread_yield (void) {
 /* Sets the current thread's priority to NEW_PRIORITY. */
 void
 thread_set_priority (int new_priority) {
+	if (thread_mlfqs) return;
+
     struct thread *curr = thread_current ();
     
     curr->init_priority = new_priority;
@@ -443,29 +529,45 @@ thread_get_priority (void) {
 
 /* Sets the current thread's nice value to NICE. */
 void
-thread_set_nice (int nice UNUSED) {
-	/* TODO: Your implementation goes here */
+thread_set_nice (int new_nice) {
+    struct thread *curr = thread_current();
+    
+    curr->nice = new_nice;
+
+    curr->priority = PRI_MAX - FP_TO_INT_RN (DIV_FP_INT (curr->recent_cpu, 4)) - (new_nice * 2);
+
+    if (curr->priority > PRI_MAX) {
+		curr->priority = PRI_MAX;}
+    else if (curr->priority < PRI_MIN) {
+		curr->priority = PRI_MIN;}
+
+    if (!list_empty (&ready_list)) {
+        struct thread *highest = list_entry (list_begin (&ready_list), struct thread, elem);
+        if (curr->priority < highest->priority) {
+			if(intr_context())
+				intr_yield_on_return ();
+			else
+				thread_yield();
+        }
+    }
 }
 
 /* Returns the current thread's nice value. */
 int
 thread_get_nice (void) {
-	/* TODO: Your implementation goes here */
-	return 0;
+	return thread_current()->nice;
 }
 
 /* Returns 100 times the system load average. */
 int
 thread_get_load_avg (void) {
-	/* TODO: Your implementation goes here */
-	return 0;
+	return FP_TO_INT_RN (MUL_FP_INT (load_avg, 100));
 }
 
 /* Returns 100 times the current thread's recent_cpu value. */
 int
 thread_get_recent_cpu (void) {
-	/* TODO: Your implementation goes here */
-	return 0;
+	return FP_TO_INT_RN (MUL_FP_INT (thread_current ()->recent_cpu, 100));
 }
 
 /* Idle thread.  Executes when no other thread is ready to run.
@@ -534,6 +636,19 @@ init_thread (struct thread *t, const char *name, int priority) {
 	t->magic = THREAD_MAGIC;
 	t->lock_needed = NULL;
     list_init (&t->donors); 
+
+	if (thread_mlfqs) {
+		if (t == initial_thread) {
+			t->nice = 0;
+			t->recent_cpu = 0;
+		} else {
+			t->nice = thread_current ()->nice;
+			t->recent_cpu = thread_current ()->recent_cpu;
+		}
+		enum intr_level old_level = intr_disable ();
+		list_push_back (&all_tlist, &t->telem);
+		intr_set_level (old_level);
+    }
 }
 
 /* Chooses and returns the next thread to be scheduled.  Should
@@ -546,7 +661,7 @@ next_thread_to_run (void) {
 	if (list_empty (&ready_list))
 		return idle_thread;
 	else
-		return list_entry (list_pop_front (&ready_list), struct thread, elem);
+		return pop_front_ready_list();
 }
 
 /* Use iretq to launch the thread */

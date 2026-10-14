@@ -33,6 +33,7 @@
 #include "threads/thread.h"
 
 static bool sema_priority_DESC (const struct list_elem *a, const struct list_elem *b, void *aux UNUSED);
+bool donor_priority_DESC (const struct list_elem *a, const struct list_elem *b, void *aux UNUSED);
 
 /* Initializes semaphore SEMA to VALUE.  A semaphore is a
    nonnegative integer along with two atomic operators for
@@ -68,7 +69,7 @@ sema_down (struct semaphore *sema) {
 
 	old_level = intr_disable ();
 	while (sema->value == 0) {
-		list_insert_ordered (&sema->waiters, &thread_current ()->elem, greater_priority, NULL);
+      list_push_back (&sema->waiters, &thread_current ()->elem);
 		thread_block ();
 	}
 	sema->value--;
@@ -127,7 +128,7 @@ sema_up (struct semaphore *sema) {
             }
         }
         
-        list_remove (max_elem);
+      list_remove (max_elem);
 		struct thread *t = list_entry (max_elem, struct thread, elem);
 		
 		thread_unblock (t);
@@ -209,25 +210,26 @@ lock_acquire (struct lock *lock) {
 	ASSERT (!lock_held_by_current_thread (lock));
 
 	struct thread *curr =  thread_current ();
+   if (!thread_mlfqs) {
+      if (lock->holder != NULL) {
+         curr->lock_needed = lock;
 
-	if (lock->holder != NULL) {
-		curr->lock_needed = lock;
+         struct thread *lock_holder = lock->holder;
+         struct thread *donor = curr;
 
-		struct thread *lock_holder = lock->holder;
-		struct thread *donor = curr;
+         list_push_back (&lock->holder->donors, &curr->d_elem);		
 
-		list_push_back (&lock->holder->donors, &curr->d_elem);		
-
-        while (lock_holder != NULL && donor->priority > lock_holder->priority) {
-			//priority-donate-ready Fail
-            //lock_holder->priority = donor->priority;   
-            thread_donate_priority (lock_holder, donor->priority);
-            if (lock_holder->lock_needed == NULL) break; 
-            
-            donor = lock_holder;
-            lock_holder = lock_holder->lock_needed->holder; 
-        }
-	}
+         while (lock_holder != NULL && donor->priority > lock_holder->priority) {
+            //priority-donate-ready Fail
+               //lock_holder->priority = donor->priority;   
+               thread_donate_priority (lock_holder, donor->priority);
+               if (lock_holder->lock_needed == NULL) break; 
+               
+               donor = lock_holder;
+               lock_holder = lock_holder->lock_needed->holder; 
+         }
+      }
+   }
 	sema_down (&lock->semaphore);
 
 	curr->lock_needed = NULL;
@@ -264,28 +266,30 @@ lock_release (struct lock *lock) {
 	ASSERT (lock != NULL);
 	ASSERT (lock_held_by_current_thread (lock));
 
-	struct thread *curr = lock->holder;
-	struct list_elem *e = list_begin (&curr->donors);
+   if (!thread_mlfqs) {
+      struct thread *curr = lock->holder;
+      struct list_elem *e = list_begin (&curr->donors);
 
-    while (e != list_end (&curr->donors)) {
-        struct thread *donor = list_entry (e, struct thread, d_elem);
-        if (donor->lock_needed == lock) {
-            e = list_remove (e);} 
-		else {
-            e = list_next (e);}
-    }
+      while (e != list_end (&curr->donors)) {
+         struct thread *donor = list_entry (e, struct thread, d_elem);
+         if (donor->lock_needed == lock) {
+               e = list_remove (e);} 
+         else {
+               e = list_next (e);}
+      }
 
-    curr->priority = curr->init_priority;
+      curr->priority = curr->init_priority;
 
-    if (!list_empty (&curr->donors)) {
-        struct list_elem *e;
-        for (e = list_begin (&curr->donors); e != list_end (&curr->donors); e = list_next (e)) {
-            struct thread *donor = list_entry (e, struct thread, d_elem);
-            if (donor->priority > curr->priority) {
-                curr->priority = donor->priority;
-            }
-        }
-    }
+      if (!list_empty (&curr->donors)) {
+         struct list_elem *e;
+         for (e = list_begin (&curr->donors); e != list_end (&curr->donors); e = list_next (e)) {
+               struct thread *donor = list_entry (e, struct thread, d_elem);
+               if (donor->priority > curr->priority) {
+                  curr->priority = donor->priority;
+               }
+         }
+      }
+   }
 
 	lock->holder = NULL;
 	sema_up (&lock->semaphore);
@@ -317,6 +321,12 @@ static bool sema_priority_DESC (const struct list_elem *a, const struct list_ele
     return ta->priority < tb->priority;
 }
 
+bool donor_priority_DESC (const struct list_elem *a, const struct list_elem *b, void *aux UNUSED) {
+    struct thread *thread_a = list_entry (a, struct thread, d_elem);
+    struct thread *thread_b = list_entry (b, struct thread, d_elem);
+
+    return thread_a->priority > thread_b->priority;
+}
 /* Initializes condition variable COND.  A condition variable
    allows one piece of code to signal a condition and cooperating
    code to receive the signal and act upon it. */
