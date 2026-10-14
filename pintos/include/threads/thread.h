@@ -91,11 +91,21 @@ struct thread {
 	enum thread_status status;          /* Thread state. */
 	char name[16];                      /* Name (for debugging purposes). */
 	int priority;                       /* Priority. */
-	int64_t deadline;										/* Start + tick */
 
 	/* Shared between thread.c and synch.c. */
 	struct list_elem elem;              /* List element. */
+	struct list_elem telem; 			/* all_thread_list element */
+	struct list_elem d_elem;			/* donors element */
 
+	int64_t deadline;
+
+    int init_priority;
+	int nice;
+	int recent_cpu;
+    
+    struct lock *lock_needed;
+    
+    struct list donors;
 
 #ifdef USERPROG
 	/* Owned by userprog/process.c. */
@@ -116,6 +126,16 @@ struct thread {
    Controlled by kernel command-line option "-o mlfqs". */
 extern bool thread_mlfqs;
 
+void yield_priority_handler (struct thread *t);
+void yield_in_interrupt (void);
+
+bool thread_priority_DESC (const struct list_elem *a, const struct list_elem *b, void *aux UNUSED);
+void thread_donate_priority (struct thread *t, int new_priority);
+
+void cal_load_avg (void);
+void cal_recent_cpu (void);
+void cal_priority (void);
+
 void thread_init (void);
 void thread_start (void);
 
@@ -123,11 +143,6 @@ void thread_awake(int64_t ticks);
 void ready_to_sleep (int64_t deadline);
 void thread_tick (void);
 void thread_print_stats (void);
-
-bool less_deadline(struct list_elem *e1, struct list_elem *e2, void *aux UNUSED);
-bool greater_priority(struct list_elem *e1, struct list_elem *e2, void *aux UNUSED);
-
-void yield_priority_handler (struct thread *t);
 
 void ready_to_sleep(int64_t deadline);
 void thread_awake(int64_t ticks);
