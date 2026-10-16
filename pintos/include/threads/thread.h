@@ -28,6 +28,7 @@ typedef int tid_t;
 #define PRI_DEFAULT 31                  /* Default priority. */
 #define PRI_MAX 63                      /* Highest priority. */
 
+
 /* A kernel thread or user process.
  *
  * Each thread structure is stored in its own 4 kB page.  The
@@ -91,11 +92,24 @@ struct thread {
 	enum thread_status status;          /* Thread state. */
 	char name[16];                      /* Name (for debugging purposes). */
 	int priority;                       /* Priority. */
+	int total_thread;
 	int64_t deadline;										/* Start + tick */
 
 	/* Shared between thread.c and synch.c. */
 	struct list_elem elem;              /* List element. */
 
+    
+    int init_priority;
+    int original_priority;
+    struct lock *wait_on_lock;
+	
+	struct lock *lock_waiting;
+    
+    struct list donations;
+    struct list_elem donation_elem;
+
+	/* USER_PROGRAM */
+	uint64_t *pm14;
 
 #ifdef USERPROG
 	/* Owned by userprog/process.c. */
@@ -116,6 +130,7 @@ struct thread {
    Controlled by kernel command-line option "-o mlfqs". */
 extern bool thread_mlfqs;
 
+void ready_list_sort(void);
 void thread_init (void);
 void thread_start (void);
 
@@ -123,7 +138,7 @@ void thread_awake(int64_t ticks);
 void ready_to_sleep (int64_t deadline);
 void thread_tick (void);
 void thread_print_stats (void);
-
+size_t total_thread_size (void);
 bool less_deadline(struct list_elem *e1, struct list_elem *e2, void *aux UNUSED);
 bool greater_priority(struct list_elem *e1, struct list_elem *e2, void *aux UNUSED);
 

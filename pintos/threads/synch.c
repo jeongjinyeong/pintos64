@@ -60,7 +60,7 @@ sema_init (struct semaphore *sema, unsigned value) {
    interrupts disabled, but if it sleeps then the next scheduled
    thread will probably turn interrupts back on. This is
    sema_down function. */
-void
+void 
 sema_down (struct semaphore *sema) {
 	enum intr_level old_level;
 
@@ -105,18 +105,32 @@ sema_try_down (struct semaphore *sema) {
    and wakes up one thread of those waiting for SEMA, if any.
 
    This function may be called from an interrupt handler. */
+bool
+sema_up_cmp (struct list_elem *e1, struct list_elem *e2, void *aux UNUSED)  {
+	struct thread *t1 = list_entry (e1, struct thread, elem);
+	struct thread *t2 = list_entry (e2, struct thread, elem);
+
+	if (t1->priority < t2->priority) {
+		return true;
+	}
+	else {
+		return false;
+	}
+}
 
 void
 sema_up (struct semaphore *sema) {
-	enum intr_level old_level;
+    enum intr_level old_level;
 
-	ASSERT (sema != NULL);
-
+    ASSERT (sema != NULL);
+	struct thread *t  = NULL;
 	old_level = intr_disable ();
-	struct thread *t = NULL;
 	if (!list_empty (&sema->waiters)){
-		t = list_entry(list_pop_front (&sema->waiters), struct thread, elem);
-		thread_unblock (t);
+		struct list_elem *max_elem = list_max (&sema->waiters, sema_up_cmp, NULL);
+		t  = list_entry(max_elem, struct thread, elem);
+
+		list_remove(max_elem);
+		thread_unblock(t);
 	}
 	sema->value++;
 	if (t!=NULL)
@@ -191,14 +205,50 @@ lock_init (struct lock *lock) {
    interrupt handler.  This function may be called with
    interrupts disabled, but interrupts will be turned back on if
    we need to sleep. */
+
+/* Bongo cat Typing
+
+   Bongo cat Typing*/
+bool
+acquire_cmp (const struct list_elem *e1, const struct list_elem *e2, void *aux UNUSED) {
+    struct thread *t1 = list_entry (e1, struct thread, donation_elem);
+    struct thread *t2 = list_entry (e2, struct thread, donation_elem);
+	if (t1->priority > t2->priority) {
+		return true;
+	}
+	else {
+		return false;
+	}
+}
+
 void
 lock_acquire (struct lock *lock) {
-	ASSERT (lock != NULL);
-	ASSERT (!intr_context ());
-	ASSERT (!lock_held_by_current_thread (lock));
+    ASSERT (lock != NULL);
+    ASSERT (!intr_context ());
+    ASSERT (!lock_held_by_current_thread (lock));
+    
+	
+    struct thread *curr = thread_current();
+    if (lock->holder != NULL)  {
+        curr->lock_waiting = lock;
+        list_insert_ordered(&lock->holder->donations, &curr->donation_elem, acquire_cmp, NULL);
 
-	sema_down (&lock->semaphore);
-	lock->holder = thread_current ();
+        struct thread *target = lock->holder;
+        while(target != NULL)  {
+            if (target->priority < curr->priority)  {
+                target->priority = curr->priority;
+                target = target->lock_waiting ? target->lock_waiting->holder : NULL;
+            }
+            else  {
+                break;
+            }
+        }
+		ready_list_sort();
+    }
+    sema_down (&lock->semaphore);
+    
+    curr->lock_waiting = NULL;
+    lock->holder = curr;
 }
 
 /* Tries to acquires LOCK and returns true if successful or false
@@ -226,15 +276,61 @@ lock_try_acquire (struct lock *lock) {
    An interrupt handler cannot acquire a lock, so it does not
    make sense to try to release a lock within an interrupt
    handler. */
+bool
+lock_release_cmp (struct list_elem *e1, struct list_elem *e2, void *aux UNUSED)  {
+	struct thread *t1 = list_entry (e1, struct thread, donation_elem);
+	struct thread *t2 = list_entry (e2, struct thread, donation_elem);
+
+	if (t1->priority < t2->priority) {
+		return true;
+	}
+	else {
+		return false;
+	}
+}
 void
 lock_release (struct lock *lock) {
-	ASSERT (lock != NULL);
-	ASSERT (lock_held_by_current_thread (lock));
+    ASSERT (lock != NULL);
+    ASSERT (lock_held_by_current_thread (lock));
 
-	lock->holder = NULL;
-	sema_up (&lock->semaphore);
+    struct thread *lw = thread_current ();
+    struct list_elem *e = list_begin(&lw->donations);
+
+    while(e != list_end(&lw->donations)) {
+        struct thread *t1 = list_entry(e, struct thread, donation_elem);
+
+        if (t1->lock_waiting == lock) {
+            e = list_remove(e);
+        }
+        else {
+            e = list_next(e);
+        }
+    }
+
+    int old_priority = lw->priority;
+		lw->priority = lw->original_priority;
+	if (!list_empty(&lw->donations)) {
+		struct thread *lw_original = list_entry(list_max(&lw->donations, lock_release_cmp, NULL), struct thread, donation_elem);
+    	lw->priority = lw_original->priority;
+	}
+	
+
+    if (!list_empty(&lw->donations)) {
+        struct list_elem *front_e = list_begin(&lw->donations);
+        struct thread *front_t = list_entry(front_e, struct thread, donation_elem);
+        
+        if (front_t->priority > lw->priority) {
+            lw->priority = front_t->priority;
+        }
+    }
+
+    lock->holder = NULL;
+    sema_up (&lock->semaphore);
+    
+    if (lw->priority < old_priority) {
+        thread_yield();
+    }
 }
-
 /* Returns true if the current thread holds LOCK, false
    otherwise.  (Note that testing whether some other thread holds
    a lock would be racy.) */
@@ -271,6 +367,25 @@ cond_init (struct condition *cond) {
 	list_init (&cond->waiters);
 }
 
+bool
+cond_cmp (struct list_elem *e1, struct list_elem *e2, void *aux UNUSED) {
+    struct semaphore_elem *s = list_entry(e2, struct semaphore_elem, elem);
+	struct thread *t1 = thread_current ();
+	if (list_empty(&s->semaphore.waiters)) {
+		return true;
+	}
+		
+	struct thread *t2 = list_entry(list_front(&s->semaphore.waiters), struct thread, elem);
+	
+	
+	
+	if (t1->priority > t2->priority) {
+		return true;
+	}
+	else {
+		return false;
+	}
+}
 /* Atomically releases LOCK and waits for COND to be signaled by
    some other piece of code.  After COND is signaled, LOCK is
    reacquired before returning.  LOCK must be held before calling
@@ -293,12 +408,12 @@ cond_init (struct condition *cond) {
    we need to sleep. */	
 void
 cond_wait (struct condition *cond, struct lock *lock) {
-	struct semaphore_elem waiter;
+    struct semaphore_elem waiter;
 
-	ASSERT (cond != NULL);
-	ASSERT (lock != NULL);
-	ASSERT (!intr_context ());
-	ASSERT (lock_held_by_current_thread (lock));
+    ASSERT (cond != NULL);
+    ASSERT (lock != NULL);
+    ASSERT (!intr_context ());
+    ASSERT (lock_held_by_current_thread (lock));
 
 	sema_init (&waiter.semaphore, 0);
 	list_insert_ordered (&cond->waiters, &waiter.elem, greater_priority_semaphore, NULL);
@@ -315,19 +430,46 @@ cond_wait (struct condition *cond, struct lock *lock) {
    An interrupt handler cannot acquire a lock, so it does not
    make sense to try to signal a condition variable within an
    interrupt handler. */
+bool
+cond_sema_priority (struct list_elem *e1, struct list_elem *e2, void *aux UNUSED) {
+	struct semaphore_elem *s1 = list_entry(e1, struct semaphore_elem, elem);
+	struct semaphore_elem *s2 = list_entry(e2, struct semaphore_elem, elem);
+
+	if (list_empty(&s1->semaphore.waiters) && list_empty(&s2->semaphore.waiters)) {
+		return true;
+	}
+
+	struct thread *t1 = list_entry(list_front(&s1->semaphore.waiters), struct thread, elem);
+	struct thread *t2 = list_entry(list_front(&s2->semaphore.waiters), struct thread, elem);
+	
+	if (t1->priority < t2->priority) {
+		return true;
+	}
+	else {
+		return false;
+	}
+}
+
 void
 cond_signal (struct condition *cond, struct lock *lock UNUSED) {
 	ASSERT (cond != NULL);
 	ASSERT (lock != NULL);
 	ASSERT (!intr_context ());
 	ASSERT (lock_held_by_current_thread (lock));
+	if (!list_empty (&cond->waiters)){
+		struct list_elem *max_elem = list_max (&cond->waiters, cond_sema_priority, NULL);
+		struct semaphore_elem *sema_e = list_entry(max_elem, struct semaphore_elem, elem);
 
-	if (!list_empty (&cond->waiters))
-		sema_up (&list_entry (list_pop_front (&cond->waiters),
-					struct semaphore_elem, elem)->semaphore);
+		list_remove(max_elem);
+		sema_up(&sema_e->semaphore);
+		
+	}
 }
 
-/* Wakes up all threads, if any, waiting on COND (protected by
+
+
+
+/* Wakes up all threads, if any, waiting on COND (protected by 
    LOCK).  LOCK must be held before calling this function.
 
    An interrupt handler cannot acquire a lock, so it does not

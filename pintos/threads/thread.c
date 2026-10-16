@@ -28,6 +28,8 @@
    that are ready to run but not actually running. */
 static struct list ready_list;
 
+
+
 /* Sleep list */
 static struct list sleep_list;
 
@@ -56,6 +58,8 @@ static unsigned thread_ticks;   /* # of timer ticks since last yield. */
    If true, use multi-level feedback queue scheduler.
    Controlled by kernel command-line option "-o mlfqs". */
 bool thread_mlfqs;
+
+
 
 static void kernel_thread (thread_func *, void *aux);
 
@@ -158,8 +162,8 @@ thread_tick (void) {
 	if (++thread_ticks >= TIME_SLICE){
 		intr_yield_on_return ();
 	}
-}
 
+}
 /* sleep_list deadline 정렬을 위한 비교 함수 */
 bool
 less_deadline (struct list_elem *e1, struct list_elem *e2, void *aux UNUSED) {
@@ -174,6 +178,12 @@ greater_priority (struct list_elem *e1, struct list_elem *e2, void *aux UNUSED) 
 	struct thread *t1 = list_entry(e1, struct thread, elem);
 	struct thread *t2 = list_entry(e2, struct thread, elem);
 	return t1->priority > t2->priority ? true : false;
+}
+bool
+donate_priority_max (struct list_elem *e1, struct list_elem *e2, void *aux UNUSED) {
+	struct thread *t1 = list_entry(e1, struct thread, donation_elem);
+	struct thread *t2 = list_entry(e2, struct thread, donation_elem);
+	return t1->priority < t2->priority ? true : false;
 }
 
 void
@@ -232,6 +242,7 @@ thread_awake (int64_t ticks) {
 		e = next;
 	}
 }
+
 
 
 /* Prints thread statistics. */
@@ -392,12 +403,35 @@ thread_yield (void) {
 	intr_set_level (old_level);
 }
 
+void
+ready_list_sort(void) {
+	list_sort(&ready_list, greater_priority, NULL);
+}
+
 /* Sets the current thread's priority to NEW_PRIORITY. */
 void
 thread_set_priority (int new_priority) {
-	thread_current ()->priority = new_priority;
-	if (!list_empty (&ready_list))
-		yield_priority_handler (list_entry(list_begin (&ready_list), struct thread, elem));
+    struct thread *curr = thread_current ();
+    curr->original_priority = new_priority;
+    
+	if (curr->priority < curr->original_priority) {
+		curr->priority = curr->original_priority;
+	}
+	else {
+		curr->priority = curr->original_priority;
+		if (!list_empty (&curr->donations)) {
+			struct thread *front_t = list_entry(list_max(&curr->donations, donate_priority_max, NULL), struct thread, donation_elem);
+			if (front_t->priority > curr->original_priority) {
+				curr->priority = front_t->priority;
+			}
+    	}
+	}
+    
+    
+    
+
+    if (!list_empty (&ready_list))
+        yield_priority_handler (list_entry(list_begin (&ready_list), struct thread, elem));
 }
 
 /* Returns the current thread's priority. */
@@ -409,27 +443,25 @@ thread_get_priority (void) {
 /* Sets the current thread's nice value to NICE. */
 void
 thread_set_nice (int nice UNUSED) {
-	/* TODO: Your implementation goes here */
+
 }
 
 /* Returns the current thread's nice value. */
 int
 thread_get_nice (void) {
-	/* TODO: Your implementation goes here */
 	return 0;
 }
 
 /* Returns 100 times the system load average. */
 int
 thread_get_load_avg (void) {
-	/* TODO: Your implementation goes here */
 	return 0;
 }
+
 
 /* Returns 100 times the current thread's recent_cpu value. */
 int
 thread_get_recent_cpu (void) {
-	/* TODO: Your implementation goes here */
 	return 0;
 }
 
@@ -496,6 +528,11 @@ init_thread (struct thread *t, const char *name, int priority) {
 	t->priority = priority;
 	t->deadline = 0;
 	t->magic = THREAD_MAGIC;
+
+	t->original_priority = priority;
+    t->lock_waiting = NULL;
+    list_init (&t->donations);
+
 }
 
 /* Chooses and returns the next thread to be scheduled.  Should
